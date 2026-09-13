@@ -12,7 +12,8 @@ Official Go client SDK for [Sightpane](https://sightpane.cloud) — real-time er
 - **High Performance & Asynchronous**: Lock-free/buffered worker queues batch and flush envelopes in the background without blocking request paths.
 - **Accurate Stack Traces**: Uses `runtime.CallersFrames` to resolve exact function names, file paths, line numbers, and in-app indicators.
 - **Panic Recovery**: Idiomatic `defer sightpane.Recover()` captures unhandled panics with full stack traces and contextual tags.
-- **Distributed Tracing**: Native W3C Trace Context (`traceparent`) support, transactions, child spans, and performance metrics.
+- **Distributed Tracing & APM**: Native W3C Trace Context (`traceparent`) support, transactions, child spans, and performance metrics (p50, p95, p99 latencies).
+- **Runtime Performance Metrics**: Built-in, toggleable background collector for Go runtime memory (`Alloc`, `Sys`, `HeapInuse`), goroutine counts, and GC activity.
 - **Context & Scopes**: Thread-safe Scope management with user identification, custom tags, extras, and breadcrumb ring buffers.
 - **HTTP Middleware**: Ready-to-use `net/http` middleware and `http.RoundTripper` for automatic request timing and distributed trace propagation.
 
@@ -45,10 +46,12 @@ import (
 
 func main() {
 	err := sightpane.Init(sightpane.Options{
-		DSN:         "https://YOUR_API_KEY@sightpane.cloud/api/v1/envelope",
-		Environment: "production",
-		Release:     "v1.0.0",
-		SampleRate:  1.0,
+		DSN:                  "https://YOUR_API_KEY@sightpane.cloud/api/v1/envelope",
+		Environment:          "production",
+		Release:              "v1.0.0",
+		SampleRate:           1.0,
+		EnableRuntimeMetrics: true,                 // Turn on Go runtime metrics
+		RuntimeMetricsInterval: 30 * time.Second, // Collect every 30s
 	})
 	if err != nil {
 		panic(err)
@@ -64,6 +67,35 @@ func main() {
 func doSomething() error {
 	return errors.New("something went wrong")
 }
+```
+
+---
+
+## Go Runtime Performance Metrics
+
+Sightpane Go includes an integrated, toggleable background poller that monitors Go runtime performance:
+- **Goroutines**: Number of active goroutines (`runtime.NumGoroutine()`)
+- **Memory Allocations**: `alloc_bytes`, `total_alloc_bytes`, `sys_bytes`, `heap_inuse_bytes`, `stack_inuse_bytes`
+- **Garbage Collector**: GC cycle count (`num_gc`), cumulative pause time (`pause_total_ns`), and CPU fraction (`gc_cpu_fraction`)
+
+### Dynamic Start & Stop
+
+You can enable, disable, or manually sample runtime metrics at any time during execution:
+
+```go
+// Start or adjust polling interval dynamically
+sightpane.StartRuntimeMetrics(15 * time.Second)
+
+// Check if poller is currently running
+if sightpane.IsRuntimeMetricsEnabled() {
+	println("Runtime metrics poller is active")
+}
+
+// Manually capture a one-off runtime snapshot
+metrics, ok := sightpane.CaptureRuntimeMetrics()
+
+// Stop / pause the background collector
+sightpane.StopRuntimeMetrics()
 ```
 
 ---
@@ -125,7 +157,7 @@ sightpane.SetExtra("job_id", 9876)
 
 ---
 
-## Distributed Tracing
+## Distributed Tracing & APM
 
 Sightpane Go supports transactions, child spans, and standard W3C `traceparent` headers.
 
@@ -192,15 +224,17 @@ resp, err := client.Do(req)
 | :--- | :--- | :--- | :--- |
 | `DSN` | `string` | `""` | Sightpane ingest DSN (e.g. `https://<key>@sightpane.cloud/api/v1/envelope` or `key`) |
 | `Endpoint` | `string` | `https://sightpane.cloud/api/v1/envelope` | Custom ingest API endpoint |
-| `APIKey` | `string` | `""` | Sightpane API project key |
+| `ProjectKey` | `string` | `""` | Sightpane API project key |
 | `Environment`| `string` | `"production"` | Deployment environment (`production`, `staging`, `dev`) |
 | `Release` | `string` | `""` | Application version or commit hash |
 | `SampleRate` | `float64`| `1.0` | Sampling rate for errors (0.0 to 1.0) |
 | `TracesSampleRate` | `float64`| `1.0` | Sampling rate for distributed traces (0.0 to 1.0) |
+| `EnableRuntimeMetrics` | `bool` | `false` | Enables periodic Go runtime metrics collection (goroutines, memory, GC) |
+| `RuntimeMetricsInterval` | `time.Duration` | `30s` | Polling frequency for runtime metrics (minimum 500ms) |
 | `MaxQueueSize` | `int` | `1000` | Maximum items in the asynchronous queue |
-| `BatchSize` | `int` | `50` | Maximum items per envelope payload |
+| `MaxBatchSize` | `int` | `50` | Maximum items per envelope payload |
 | `FlushInterval` | `time.Duration` | `2s` | Flush interval for queued items |
-| `BeforeSend` | `func(*ErrorItem) *ErrorItem` | `nil` | Callback to mutate or drop errors prior to sending |
+| `BeforeSend` | `func(any) any` | `nil` | Callback to mutate or drop items prior to sending |
 
 ---
 

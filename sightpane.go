@@ -35,6 +35,36 @@ func CurrentClient() *Client {
 	return globalClient
 }
 
+// StartRuntimeMetrics enables periodic background collection of Go runtime metrics on the global client.
+func StartRuntimeMetrics(interval ...time.Duration) {
+	if c := CurrentClient(); c != nil {
+		c.StartRuntimeMetrics(interval...)
+	}
+}
+
+// StopRuntimeMetrics pauses or disables periodic collection of runtime metrics on the global client.
+func StopRuntimeMetrics() {
+	if c := CurrentClient(); c != nil {
+		c.StopRuntimeMetrics()
+	}
+}
+
+// IsRuntimeMetricsEnabled reports whether the runtime metrics worker is active on the global client.
+func IsRuntimeMetricsEnabled() bool {
+	if c := CurrentClient(); c != nil {
+		return c.IsRuntimeMetricsEnabled()
+	}
+	return false
+}
+
+// CaptureRuntimeMetrics reads current runtime metrics and enqueues them on the global client.
+func CaptureRuntimeMetrics() (RuntimeMetrics, bool) {
+	if c := CurrentClient(); c != nil {
+		return c.CaptureRuntimeMetrics(), true
+	}
+	return RuntimeMetrics{}, false
+}
+
 // CaptureException reports an error using the global client.
 func CaptureException(err error) string {
 	c := CurrentClient()

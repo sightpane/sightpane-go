@@ -7,6 +7,7 @@ import (
 	"log"
 	"math/rand"
 	"reflect"
+	"sync"
 	"time"
 )
 
@@ -16,6 +17,10 @@ type Client struct {
 	transport Transport
 	queue     *eventQueue
 	scope     *Scope
+
+	metricsMu     sync.Mutex
+	metricsCancel context.CancelFunc
+	metricsActive bool
 }
 
 // NewClient initializes a new Sightpane client with the specified options.
@@ -34,6 +39,10 @@ func NewClient(opts Options) (*Client, error) {
 		scope:     NewScope(),
 	}
 
+	if opts.EnableRuntimeMetrics {
+		client.StartRuntimeMetrics(opts.RuntimeMetricsInterval)
+	}
+
 	return client, nil
 }
 
@@ -45,6 +54,76 @@ func (c *Client) Options() Options {
 // Scope returns the client's global scope.
 func (c *Client) Scope() *Scope {
 	return c.scope
+}
+
+// StartRuntimeMetrics enables periodic background collection and ingestion of Go runtime metrics.
+// If interval is provided, it sets the ticker duration (minimum 500ms).
+func (c *Client) StartRuntimeMetrics(interval ...time.Duration) {
+	c.metricsMu.Lock()
+	defer c.metricsMu.Unlock()
+
+	if c.metricsActive && c.metricsCancel != nil {
+		c.metricsCancel()
+		c.metricsCancel = nil
+		c.metricsActive = false
+	}
+
+	d := c.options.RuntimeMetricsInterval
+	if len(interval) > 0 && interval[0] > 0 {
+		d = interval[0]
+	}
+	if d < 500*time.Millisecond {
+		d = 500 * time.Millisecond
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	c.metricsCancel = cancel
+	c.metricsActive = true
+
+	go c.runRuntimeMetricsWorker(ctx, d)
+}
+
+// StopRuntimeMetrics pauses or disables the periodic collection of runtime metrics.
+func (c *Client) StopRuntimeMetrics() {
+	c.metricsMu.Lock()
+	defer c.metricsMu.Unlock()
+
+	if !c.metricsActive {
+		return
+	}
+	if c.metricsCancel != nil {
+		c.metricsCancel()
+		c.metricsCancel = nil
+	}
+	c.metricsActive = false
+}
+
+// IsRuntimeMetricsEnabled reports whether the background runtime metrics poller is currently active.
+func (c *Client) IsRuntimeMetricsEnabled() bool {
+	c.metricsMu.Lock()
+	defer c.metricsMu.Unlock()
+	return c.metricsActive
+}
+
+// CaptureRuntimeMetrics reads the current runtime metrics and immediately enqueues them as an event.
+func (c *Client) CaptureRuntimeMetrics() RuntimeMetrics {
+	rm := ReadRuntimeMetrics()
+	c.CaptureEvent("runtime_metrics", rm.ToProps(), nil)
+	return rm
+}
+
+func (c *Client) runRuntimeMetricsWorker(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			c.CaptureRuntimeMetrics()
+		}
+	}
 }
 
 // CaptureException logs an error with stack trace and scope metadata.
@@ -153,8 +232,9 @@ func (c *Client) Flush(timeout time.Duration) bool {
 	return err == nil
 }
 
-// Close flushes and shuts down the client background worker.
+// Close stops runtime metric collection, flushes pending items, and shuts down the background worker.
 func (c *Client) Close() error {
+	c.StopRuntimeMetrics()
 	return c.queue.Close()
 }
 

@@ -13,11 +13,12 @@ const (
 	SDKName    = "sightpane-go"
 	SDKVersion = "0.1.0"
 
-	defaultFlushInterval = 2 * time.Second
-	defaultMaxBatchSize  = 50
-	defaultMaxQueueSize  = 1000
-	defaultMaxBreadcrumb = 50
-	defaultSampleRate    = 1.0
+	defaultFlushInterval          = 2 * time.Second
+	defaultMaxBatchSize           = 50
+	defaultMaxQueueSize           = 1000
+	defaultMaxBreadcrumb          = 50
+	defaultSampleRate             = 1.0
+	defaultRuntimeMetricsInterval = 30 * time.Second
 )
 
 // Options holds configuration for initializing the Sightpane client.
@@ -64,6 +65,14 @@ type Options struct {
 
 	// FlushInterval is how often pending items are dispatched if batch size is not reached. Default is 2s.
 	FlushInterval time.Duration
+
+	// EnableRuntimeMetrics toggles periodic background collection and reporting of Go runtime
+	// metrics (memory allocations, goroutine counts, GC activity). Default is false.
+	EnableRuntimeMetrics bool
+
+	// RuntimeMetricsInterval defines how often runtime metrics are gathered and dispatched.
+	// Default is 30 seconds (if EnableRuntimeMetrics is true). Minimum is 500ms.
+	RuntimeMetricsInterval time.Duration
 
 	// HTTPClient allows providing a custom *http.Client for transport.
 	HTTPClient *http.Client
@@ -129,6 +138,9 @@ func (o *Options) normalize() error {
 	}
 	if o.FlushInterval <= 0 {
 		o.FlushInterval = defaultFlushInterval
+	}
+	if o.RuntimeMetricsInterval <= 0 {
+		o.RuntimeMetricsInterval = defaultRuntimeMetricsInterval
 	}
 	if o.HTTPClient == nil {
 		o.HTTPClient = &http.Client{
